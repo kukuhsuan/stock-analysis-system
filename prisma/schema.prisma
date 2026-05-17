@@ -1,0 +1,26 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model StockAnalysisCache {
+  id           Int      @id @default(autoincrement())
+  symbol       String   @unique
+  analysisJson String
+  score        Int
+  status       String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model FavoriteStock {
+  id        Int      @id @default(autoincrement())
+  symbol    String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+}
