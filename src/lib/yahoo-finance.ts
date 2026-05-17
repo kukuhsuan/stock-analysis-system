@@ -1,37 +1,30 @@
 import axios from 'axios'
+// @ts-ignore
+import { wrapper } from 'axios-cookiejar-support'
+// @ts-ignore
+import { CookieJar } from 'tough-cookie'
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+const HEADERS = { 'User-Agent': USER_AGENT, 'Accept': 'application/json' }
 
-const HEADERS = {
-  'User-Agent': USER_AGENT,
-  'Accept': 'application/json',
-  'Accept-Language': 'en-US,en;q=0.9',
-}
+// Cookie jar client for Yahoo Finance authentication
+const jar = new CookieJar()
+const yfClient = wrapper(axios.create({ jar, withCredentials: true }))
 
-// Yahoo Finance crumb cache（crumb + cookie 用於 v10 API）
-let _crumbCache: { crumb: string; cookie: string; ts: number } | null = null
+// Crumb cache（在同一個 serverless instance 內有效）
+let _crumb: string | null = null
+let _crumbTs = 0
 
-async function getYahooCrumb(): Promise<{ crumb: string; cookie: string } | null> {
+async function getYahooCrumb(): Promise<string | null> {
   try {
-    // Use cached crumb if less than 1 hour old
-    if (_crumbCache && Date.now() - _crumbCache.ts < 3600000) {
-      return { crumb: _crumbCache.crumb, cookie: _crumbCache.cookie }
-    }
-    // Get cookie from Yahoo Finance main page
-    const cookieRes = await axios.get('https://fc.yahoo.com', {
-      headers: { 'User-Agent': USER_AGENT },
-      timeout: 8000,
-      maxRedirects: 5,
+    if (_crumb && Date.now() - _crumbTs < 3600000) return _crumb
+    await yfClient.get('https://fc.yahoo.com', { headers: { 'User-Agent': USER_AGENT }, timeout: 8000 }).catch(() => {})
+    const res = await yfClient.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+      headers: { 'User-Agent': USER_AGENT }, timeout: 8000,
     })
-    const setCookie = (cookieRes.headers['set-cookie'] ?? []).map((c: string) => c.split(';')[0]).join('; ')
-    // Get crumb
-    const crumbRes = await axios.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-      headers: { ...HEADERS, Cookie: setCookie },
-      timeout: 8000,
-    })
-    const crumb = crumbRes.data as string
-    _crumbCache = { crumb, cookie: setCookie, ts: Date.now() }
-    return { crumb, cookie: setCookie }
+    _crumb = res.data as string
+    _crumbTs = Date.now()
+    return _crumb
   } catch { return null }
 }
 
@@ -124,10 +117,10 @@ export async function getUSStockFundamentals(symbol: string) {
       'summaryDetail',
       'financialData',
     ].join(',')
-    const auth = await getYahooCrumb()
-    const res = await axios.get(url, {
-      params: { modules, ...(auth ? { crumb: auth.crumb } : {}) },
-      headers: { ...HEADERS, ...(auth ? { Cookie: auth.cookie } : {}) },
+    const crumb = await getYahooCrumb()
+    const res = await yfClient.get(url, {
+      params: { modules, ...(crumb ? { crumb } : {}) },
+      headers: HEADERS,
       timeout: 15000,
     })
     const data = res.data?.quoteSummary?.result?.[0]
