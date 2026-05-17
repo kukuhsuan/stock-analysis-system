@@ -26,7 +26,7 @@ export async function analyzeStockWithAI(stockData: {
   finalStatusLabel: string
   disclaimer: string
 }> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
   const prompt = `你是一位專業的台灣股票分析師。請根據以下股票資料，產生一份詳細的股票分析報告。
 
