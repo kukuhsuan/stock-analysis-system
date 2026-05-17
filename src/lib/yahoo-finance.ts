@@ -113,80 +113,116 @@ export async function getUSStockPrice(symbol: string, days = 90) {
   } catch { return [] }
 }
 
-// 財報 + 估值指標
-export async function getUSStockFundamentals(symbol: string) {
+// 從 v8 chart meta 抓估值（不需要 crumb，穩定）
+async function getFundamentalsFromV8(symbol: string) {
   try {
-    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`
-    const modules = [
-      'incomeStatementHistory',
-      'balanceSheetHistory',
-      'defaultKeyStatistics',
-      'summaryDetail',
-      'financialData',
-    ].join(',')
-    const crumb = await getYahooCrumb()
-    const client = await getYFClient()
-    const res = await client.get(url, {
-      params: { modules, ...(crumb ? { crumb } : {}) },
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`
+    const res = await axios.get(url, {
+      params: { interval: '1d', range: '1d', modules: 'defaultKeyStatistics,summaryDetail,financialData' },
       headers: HEADERS,
-      timeout: 15000,
+      timeout: 10000,
     })
-    const data = res.data?.quoteSummary?.result?.[0]
-    if (!data) return null
-
-    const fd = data.financialData ?? {}
-    const sd = data.summaryDetail ?? {}
-    const ks = data.defaultKeyStatistics ?? {}
-
-    // 估值
-    const per = {
-      per: sd.trailingPE?.raw ?? ks.forwardPE?.raw ?? null,
-      pbr: ks.priceToBook?.raw ?? null,
-      dividendYield: sd.dividendYield?.raw ? sd.dividendYield.raw * 100 : null,
+    const meta = res.data?.chart?.result?.[0]?.meta ?? {}
+    return {
+      per: meta.trailingPE ?? null,
+      pbr: null as number | null,
+      dividendYield: meta.trailingAnnualDividendYield ? meta.trailingAnnualDividendYield * 100 : null,
     }
+  } catch { return null }
+}
 
-    // 財務指標
-    const metrics = {
-      grossMargin: fd.grossMargins?.raw ? (fd.grossMargins.raw * 100).toFixed(1) : null,
-      operatingMargin: fd.operatingMargins?.raw ? (fd.operatingMargins.raw * 100).toFixed(1) : null,
-      netMargin: fd.profitMargins?.raw ? (fd.profitMargins.raw * 100).toFixed(1) : null,
-      roe: fd.returnOnEquity?.raw ? (fd.returnOnEquity.raw * 100).toFixed(1) : null,
-      debtRatio: null as string | null,
-    }
+// 財報 + 估值指標（先試 query2 不帶 crumb，失敗就 fallback v8）
+export async function getUSStockFundamentals(symbol: string) {
+  // 先嘗試 query2（有時不需要 crumb）
+  const v10Result = await tryV10Fundamentals(symbol)
+  if (v10Result) return v10Result
 
-    // 近四季 EPS + 收入
-    const incomeHistory = data.incomeStatementHistory?.incomeStatementHistory ?? []
-    const bsHistory = data.balanceSheetHistory?.balanceSheetStatements ?? []
-
-    // 計算負債比
-    if (bsHistory[0]) {
-      const bs = bsHistory[0]
-      const totalAssets = bs.totalAssets?.raw
-      const totalLiab = bs.totalLiab?.raw
-      if (totalAssets && totalLiab) {
-        metrics.debtRatio = ((totalLiab / totalAssets) * 100).toFixed(1)
-      }
-    }
-
-    const financials = incomeHistory.map((q: any) => ({
-      date: new Date(q.endDate?.raw * 1000).toISOString().split('T')[0],
-      eps: q.basicEPS?.raw ?? null,
-      revenue: q.totalRevenue?.raw ?? null,
-      grossProfit: q.grossProfit?.raw ?? null,
-      netIncome: q.netIncome?.raw ?? null,
-      operatingIncome: q.operatingIncome?.raw ?? null,
-    }))
-
-    const balanceSheet = bsHistory.map((b: any) => ({
-      date: new Date(b.endDate?.raw * 1000).toISOString().split('T')[0],
-      totalAssets: b.totalAssets?.raw ?? null,
-      totalLiabilities: b.totalLiab?.raw ?? null,
-      totalEquity: b.totalStockholderEquity?.raw ?? null,
-    }))
-
-    return { per, metrics, financials, balanceSheet }
-  } catch (e) {
-    console.error('Yahoo Finance fundamentals error:', e)
-    return null
+  // fallback：只回傳 v8 能取到的估值，財報欄位留空
+  const perFromV8 = await getFundamentalsFromV8(symbol)
+  if (!perFromV8) return null
+  return {
+    per: perFromV8,
+    metrics: { grossMargin: null, operatingMargin: null, netMargin: null, roe: null, debtRatio: null },
+    financials: [],
+    balanceSheet: [],
   }
+}
+
+async function tryV10Fundamentals(symbol: string) {
+  const modules = [
+    'incomeStatementHistory',
+    'balanceSheetHistory',
+    'defaultKeyStatistics',
+    'summaryDetail',
+    'financialData',
+  ].join(',')
+
+  // 嘗試不同的 host + crumb 組合
+  const attempts = [
+    { host: 'query2.finance.yahoo.com', withCrumb: false },
+    { host: 'query1.finance.yahoo.com', withCrumb: true },
+  ]
+
+  for (const { host, withCrumb } of attempts) {
+    try {
+      const crumb = withCrumb ? await getYahooCrumb() : null
+      const client = withCrumb ? await getYFClient() : axios
+      const res = await client.get(`https://${host}/v10/finance/quoteSummary/${symbol}`, {
+        params: { modules, ...(crumb ? { crumb } : {}) },
+        headers: { ...HEADERS, 'Accept-Language': 'en-US,en;q=0.9' },
+        timeout: 12000,
+      })
+      const data = res.data?.quoteSummary?.result?.[0]
+      if (!data) continue
+
+      const fd = data.financialData ?? {}
+      const sd = data.summaryDetail ?? {}
+      const ks = data.defaultKeyStatistics ?? {}
+
+      const per = {
+        per: sd.trailingPE?.raw ?? ks.forwardPE?.raw ?? null,
+        pbr: ks.priceToBook?.raw ?? null,
+        dividendYield: sd.dividendYield?.raw ? sd.dividendYield.raw * 100 : null,
+      }
+
+      const metrics = {
+        grossMargin: fd.grossMargins?.raw ? (fd.grossMargins.raw * 100).toFixed(1) : null,
+        operatingMargin: fd.operatingMargins?.raw ? (fd.operatingMargins.raw * 100).toFixed(1) : null,
+        netMargin: fd.profitMargins?.raw ? (fd.profitMargins.raw * 100).toFixed(1) : null,
+        roe: fd.returnOnEquity?.raw ? (fd.returnOnEquity.raw * 100).toFixed(1) : null,
+        debtRatio: null as string | null,
+      }
+
+      const incomeHistory = data.incomeStatementHistory?.incomeStatementHistory ?? []
+      const bsHistory = data.balanceSheetHistory?.balanceSheetStatements ?? []
+
+      if (bsHistory[0]) {
+        const bs = bsHistory[0]
+        const totalAssets = bs.totalAssets?.raw
+        const totalLiab = bs.totalLiab?.raw
+        if (totalAssets && totalLiab) {
+          metrics.debtRatio = ((totalLiab / totalAssets) * 100).toFixed(1)
+        }
+      }
+
+      const financials = incomeHistory.map((q: any) => ({
+        date: new Date(q.endDate?.raw * 1000).toISOString().split('T')[0],
+        eps: q.basicEPS?.raw ?? null,
+        revenue: q.totalRevenue?.raw ?? null,
+        grossProfit: q.grossProfit?.raw ?? null,
+        netIncome: q.netIncome?.raw ?? null,
+        operatingIncome: q.operatingIncome?.raw ?? null,
+      }))
+
+      const balanceSheet = bsHistory.map((b: any) => ({
+        date: new Date(b.endDate?.raw * 1000).toISOString().split('T')[0],
+        totalAssets: b.totalAssets?.raw ?? null,
+        totalLiabilities: b.totalLiab?.raw ?? null,
+        totalEquity: b.totalStockholderEquity?.raw ?? null,
+      }))
+
+      return { per, metrics, financials, balanceSheet }
+    } catch { continue }
+  }
+  return null
 }
