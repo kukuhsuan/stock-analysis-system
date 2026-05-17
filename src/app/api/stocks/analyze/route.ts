@@ -1,4 +1,6 @@
 import { NextRequest } from 'next/server'
+
+export const maxDuration = 60 // seconds - Vercel Pro/Hobby max
 import { getStockInfo, getLatestPrice, getFinancialStatements, getBalanceSheet, getMonthlyRevenue, getInstitutionalInvestors, getPER, getStockPrice } from '@/lib/finmind'
 import { analyzeTechnical } from '@/lib/technical'
 import { calculateScore } from '@/lib/scorer'

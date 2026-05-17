@@ -54,42 +54,47 @@ export async function getLatestPrice(symbol: string) {
   }
 }
 
-// 季度財報（損益表）
+// 季度財報（損益表）- 每個 date 下有多個 type 指標，需按 date 合併
 export async function getFinancialStatements(symbol: string) {
   try {
     const data = await fetchFinMind('TaiwanStockFinancialStatements', symbol, getStartDate(730))
-    // group by date+type
-    const byQuarter: Record<string, any> = {}
+    const byDate: Record<string, any> = {}
     for (const row of data) {
-      const key = `${row.date}_${row.type}`
-      if (!byQuarter[key]) byQuarter[key] = { date: row.date, type: row.type }
+      const key = row.date
+      if (!byDate[key]) byDate[key] = { date: row.date }
       const name: string = row.origin_name ?? ''
-      if (name.includes('每股盈餘') || name === 'EPS') byQuarter[key].eps = row.value
-      if (name.includes('營業收入') || name === 'Revenue') byQuarter[key].revenue = row.value
-      if (name.includes('毛利') && !name.includes('率')) byQuarter[key].grossProfit = row.value
-      if (name.includes('營業利益') && !name.includes('率')) byQuarter[key].operatingIncome = row.value
-      if (name.includes('稅後') || name.includes('淨利') || name.includes('NetIncome')) byQuarter[key].netIncome = row.value
+      const typeCode: string = row.type ?? ''
+      if (typeCode === 'EPS' || name.includes('每股盈餘')) byDate[key].eps = row.value
+      if (typeCode === 'Revenue' || typeCode === 'OperatingRevenue' || name.includes('營業收入')) byDate[key].revenue = row.value
+      if (typeCode === 'GrossProfit' || (name.includes('毛利') && !name.includes('率'))) byDate[key].grossProfit = row.value
+      if (typeCode === 'OperatingIncome' || (name.includes('營業利益') && !name.includes('率'))) byDate[key].operatingIncome = row.value
+      if (typeCode === 'NetIncome' || typeCode === 'ProfitAfterTax' || name.includes('稅後') || name.includes('本期淨利')) byDate[key].netIncome = row.value
     }
-    return Object.values(byQuarter)
+    return Object.values(byDate)
+      .filter((q: any) => q.eps != null || q.revenue != null)
       .sort((a: any, b: any) => b.date.localeCompare(a.date))
       .slice(0, 8)
   } catch { return [] }
 }
 
-// 資產負債表
+// 資產負債表 - 同樣按 date 合併
 export async function getBalanceSheet(symbol: string) {
   try {
     const data = await fetchFinMind('TaiwanStockBalanceSheet', symbol, getStartDate(400))
-    const byQuarter: Record<string, any> = {}
+    const byDate: Record<string, any> = {}
     for (const row of data) {
-      const key = `${row.date}_${row.type}`
-      if (!byQuarter[key]) byQuarter[key] = { date: row.date, type: row.type }
+      const key = row.date
+      if (!byDate[key]) byDate[key] = { date: row.date }
       const name: string = row.origin_name ?? ''
-      if (name.includes('資產總') || name === 'TotalAssets') byQuarter[key].totalAssets = row.value
-      if (name.includes('負債總') || name === 'TotalLiabilities') byQuarter[key].totalLiabilities = row.value
-      if (name.includes('權益總') || name === 'TotalEquity') byQuarter[key].totalEquity = row.value
+      const typeCode: string = row.type ?? ''
+      if (typeCode === 'TotalAssets' || name.includes('資產總')) byDate[key].totalAssets = row.value
+      if (typeCode === 'TotalLiabilities' || name.includes('負債總')) byDate[key].totalLiabilities = row.value
+      if (typeCode === 'TotalEquity' || name.includes('權益總')) byDate[key].totalEquity = row.value
     }
-    return Object.values(byQuarter).sort((a: any, b: any) => b.date.localeCompare(a.date)).slice(0, 4)
+    return Object.values(byDate)
+      .filter((b: any) => b.totalAssets != null || b.totalLiabilities != null)
+      .sort((a: any, b: any) => b.date.localeCompare(a.date))
+      .slice(0, 4)
   } catch { return [] }
 }
 

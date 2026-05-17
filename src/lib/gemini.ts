@@ -92,13 +92,18 @@ ${stockData.monthlyRevenue.slice(0, 3).map(r => `- ${r.revenue_year}/${r.revenue
   try {
     const result = await model.generateContent(prompt)
     const text = result.response.text().trim()
-    const jsonText = text.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim()
+    // Extract JSON - handle various formats Gemini might return
+    let jsonText = text
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (jsonMatch) jsonText = jsonMatch[0]
+    else jsonText = text.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
     const parsed = JSON.parse(jsonText)
     return {
       ...parsed,
       disclaimer: '⚠️ 本分析僅供參考，非投資建議。投資有風險，請謹慎評估並自行負責投資決策。',
     }
   } catch (error) {
+    console.error('Gemini analysis error:', error)
     return {
       summary: '無法取得 AI 分析，請稍後再試。',
       strengths: [],
