@@ -1,8 +1,38 @@
 import axios from 'axios'
 
+const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+  'User-Agent': USER_AGENT,
   'Accept': 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+}
+
+// Yahoo Finance crumb cache（crumb + cookie 用於 v10 API）
+let _crumbCache: { crumb: string; cookie: string; ts: number } | null = null
+
+async function getYahooCrumb(): Promise<{ crumb: string; cookie: string } | null> {
+  try {
+    // Use cached crumb if less than 1 hour old
+    if (_crumbCache && Date.now() - _crumbCache.ts < 3600000) {
+      return { crumb: _crumbCache.crumb, cookie: _crumbCache.cookie }
+    }
+    // Get cookie from Yahoo Finance main page
+    const cookieRes = await axios.get('https://fc.yahoo.com', {
+      headers: { 'User-Agent': USER_AGENT },
+      timeout: 8000,
+      maxRedirects: 5,
+    })
+    const setCookie = (cookieRes.headers['set-cookie'] ?? []).map((c: string) => c.split(';')[0]).join('; ')
+    // Get crumb
+    const crumbRes = await axios.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+      headers: { ...HEADERS, Cookie: setCookie },
+      timeout: 8000,
+    })
+    const crumb = crumbRes.data as string
+    _crumbCache = { crumb, cookie: setCookie, ts: Date.now() }
+    return { crumb, cookie: setCookie }
+  } catch { return null }
 }
 
 function getStartTimestamp(daysAgo: number): number {
@@ -93,11 +123,11 @@ export async function getUSStockFundamentals(symbol: string) {
       'defaultKeyStatistics',
       'summaryDetail',
       'financialData',
-      'calendarEvents',
     ].join(',')
+    const auth = await getYahooCrumb()
     const res = await axios.get(url, {
-      params: { modules },
-      headers: HEADERS,
+      params: { modules, ...(auth ? { crumb: auth.crumb } : {}) },
+      headers: { ...HEADERS, ...(auth ? { Cookie: auth.cookie } : {}) },
       timeout: 15000,
     })
     const data = res.data?.quoteSummary?.result?.[0]
