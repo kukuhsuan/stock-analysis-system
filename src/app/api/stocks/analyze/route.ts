@@ -69,7 +69,10 @@ export async function GET(request: NextRequest) {
         ? ((latestBS.totalLiabilities / latestBS.totalAssets) * 100).toFixed(1)
         : null,
       roe: latestFinancial?.netIncome && latestBS?.totalEquity
-        ? ((latestFinancial.netIncome / latestBS.totalEquity) * 100).toFixed(1)
+        ? (() => {
+            const v = (latestFinancial.netIncome / latestBS.totalEquity) * 100
+            return v > 0 && v < 10000 ? v.toFixed(1) : null // 合理範圍內才顯示
+          })()
         : null,
     }
 
