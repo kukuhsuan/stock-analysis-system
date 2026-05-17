@@ -2,10 +2,15 @@ import { NextRequest } from 'next/server'
 
 export const maxDuration = 60 // seconds - Vercel Pro/Hobby max
 import { getStockInfo, getLatestPrice, getFinancialStatements, getBalanceSheet, getMonthlyRevenue, getInstitutionalInvestors, getPER, getStockPrice } from '@/lib/finmind'
+import { getUSStockInfo, getUSStockPrice, getUSStockFundamentals } from '@/lib/yahoo-finance'
 import { analyzeTechnical } from '@/lib/technical'
 import { calculateScore } from '@/lib/scorer'
 import { analyzeStockWithAI } from '@/lib/gemini'
 import { prisma } from '@/lib/prisma'
+
+function isUSStock(symbol: string): boolean {
+  return /^[A-Za-z]+$/.test(symbol)
+}
 
 export async function GET(request: NextRequest) {
   const symbol = request.nextUrl.searchParams.get('symbol')
@@ -21,6 +26,70 @@ export async function GET(request: NextRequest) {
         return Response.json({ ...JSON.parse(cached.analysisJson), cached: true })
       }
     }
+
+    // === 美股處理 ===
+    if (isUSStock(symbol)) {
+      const [usInfo, priceHistory, fundamentals] = await Promise.all([
+        getUSStockInfo(symbol),
+        getUSStockPrice(symbol, 90),
+        getUSStockFundamentals(symbol),
+      ])
+
+      if (!usInfo) return Response.json({ error: `找不到美股代號 ${symbol}` }, { status: 404 })
+
+      const technical = analyzeTechnical(priceHistory)
+      const per = fundamentals?.per ?? null
+      const metrics = fundamentals?.metrics ?? { grossMargin: null, operatingMargin: null, netMargin: null, roe: null, debtRatio: null }
+      const financials = fundamentals?.financials ?? []
+      const balanceSheet = fundamentals?.balanceSheet ?? []
+      const monthlyRevenue: any[] = []
+      const institutional = { days: [], totals: { foreignNet: 0, investmentTrustNet: 0, dealerNet: 0 } }
+
+      const score = calculateScore({ financials, balanceSheet, monthlyRevenue, technical, per })
+
+      const aiAnalysis = await analyzeStockWithAI({
+        symbol,
+        name: usInfo.name,
+        price: usInfo.price,
+        per,
+        financials,
+        balanceSheet,
+        monthlyRevenue,
+        technical,
+        institutional,
+        score,
+      })
+
+      const result = {
+        symbol,
+        name: usInfo.name,
+        market: 'US',
+        industry: usInfo.industry ?? '',
+        currency: usInfo.currency ?? 'USD',
+        price: usInfo.price,
+        per,
+        metrics,
+        financials: financials.slice(0, 4),
+        balanceSheet: balanceSheet.slice(0, 2),
+        monthlyRevenue: [],
+        institutional,
+        technical,
+        score,
+        aiAnalysis,
+        updatedAt: new Date().toISOString(),
+      }
+
+      const expiresAt = new Date()
+      expiresAt.setHours(expiresAt.getHours() + 24)
+      await prisma.stockAnalysisCache.upsert({
+        where: { symbol },
+        create: { symbol, analysisJson: JSON.stringify(result), score: score.total, status: score.status, expiresAt },
+        update: { analysisJson: JSON.stringify(result), score: score.total, status: score.status, expiresAt, updatedAt: new Date() },
+      }).catch(() => {})
+
+      return Response.json(result)
+    }
+    // === 美股處理結束 ===
 
     // Fetch all data in parallel
     const [info, price, priceHistory, financials, balanceSheet, monthlyRevenue, institutional, per] = await Promise.all([

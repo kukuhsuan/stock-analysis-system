@@ -11,6 +11,15 @@ const HOT_STOCKS = [
   { symbol: '2882', name: '國泰金' },
 ]
 
+const HOT_US_STOCKS = [
+  { symbol: 'AAPL', name: 'Apple' },
+  { symbol: 'NVDA', name: 'NVIDIA' },
+  { symbol: 'TSLA', name: 'Tesla' },
+  { symbol: 'MSFT', name: 'Microsoft' },
+  { symbol: 'GOOGL', name: 'Google' },
+  { symbol: 'META', name: 'Meta' },
+]
+
 export default function Home() {
   const router = useRouter()
   const [input, setInput] = useState('')
@@ -61,7 +70,7 @@ export default function Home() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSearch(input)}
-            placeholder="輸入股票代號，例如：2330"
+            placeholder="輸入股票代號，例如：2330 或 AAPL"
             className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg"
             autoFocus
           />
@@ -78,13 +87,26 @@ export default function Home() {
 
       {/* Hot Stocks */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">熱門股票</h2>
-        <div className="grid grid-cols-3 gap-2">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">熱門台股</h2>
+        <div className="grid grid-cols-3 gap-2 mb-5">
           {HOT_STOCKS.map(s => (
             <button
               key={s.symbol}
               onClick={() => handleSearch(s.symbol)}
               className="flex flex-col items-center p-3 rounded-xl hover:bg-blue-50 hover:border-blue-200 border border-gray-100 transition-colors text-left"
+            >
+              <span className="font-semibold text-gray-900 text-sm">{s.symbol}</span>
+              <span className="text-xs text-gray-500 mt-0.5">{s.name}</span>
+            </button>
+          ))}
+        </div>
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">熱門美股</h2>
+        <div className="grid grid-cols-3 gap-2">
+          {HOT_US_STOCKS.map(s => (
+            <button
+              key={s.symbol}
+              onClick={() => handleSearch(s.symbol)}
+              className="flex flex-col items-center p-3 rounded-xl hover:bg-green-50 hover:border-green-200 border border-gray-100 transition-colors text-left"
             >
               <span className="font-semibold text-gray-900 text-sm">{s.symbol}</span>
               <span className="text-xs text-gray-500 mt-0.5">{s.name}</span>
