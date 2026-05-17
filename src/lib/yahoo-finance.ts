@@ -1,25 +1,32 @@
 import axios from 'axios'
-// @ts-ignore
-import { wrapper } from 'axios-cookiejar-support'
-// @ts-ignore
-import { CookieJar } from 'tough-cookie'
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 const HEADERS = { 'User-Agent': USER_AGENT, 'Accept': 'application/json' }
 
-// Cookie jar client for Yahoo Finance authentication
-const jar = new CookieJar()
-const yfClient = wrapper(axios.create({ jar, withCredentials: true }))
-
-// Crumb cache（在同一個 serverless instance 內有效）
+// Crumb cache
 let _crumb: string | null = null
 let _crumbTs = 0
+let _yfClient: any = null
+
+async function getYFClient() {
+  if (_yfClient) return _yfClient
+  try {
+    const { wrapper } = await import('axios-cookiejar-support')
+    const { CookieJar } = await import('tough-cookie')
+    const jar = new CookieJar()
+    _yfClient = wrapper(axios.create({ jar, withCredentials: true }))
+  } catch {
+    _yfClient = axios
+  }
+  return _yfClient
+}
 
 async function getYahooCrumb(): Promise<string | null> {
   try {
     if (_crumb && Date.now() - _crumbTs < 3600000) return _crumb
-    await yfClient.get('https://fc.yahoo.com', { headers: { 'User-Agent': USER_AGENT }, timeout: 8000 }).catch(() => {})
-    const res = await yfClient.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    const client = await getYFClient()
+    await client.get('https://fc.yahoo.com', { headers: { 'User-Agent': USER_AGENT }, timeout: 8000 }).catch(() => {})
+    const res = await client.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
       headers: { 'User-Agent': USER_AGENT }, timeout: 8000,
     })
     _crumb = res.data as string
@@ -118,7 +125,8 @@ export async function getUSStockFundamentals(symbol: string) {
       'financialData',
     ].join(',')
     const crumb = await getYahooCrumb()
-    const res = await yfClient.get(url, {
+    const client = await getYFClient()
+    const res = await client.get(url, {
       params: { modules, ...(crumb ? { crumb } : {}) },
       headers: HEADERS,
       timeout: 15000,
